@@ -1,0 +1,9 @@
+torch
+torchvision
+fastapi
+uvicorn
+pandas
+openpyxl
+pillow
+numpy
+requests
