@@ -1,27 +1,19 @@
 from huggingface_hub import HfApi
+import os
 
 api     = HfApi()
 REPO_ID = "OmarSherif0/landmark-detection"
 
-# Change Space SDK to Docker
-print("Changing Space SDK to Docker...")
-api.request_space_hardware(
-    repo_id  = REPO_ID,
-    hardware = "cpu-basic"
-)
+files = ["app.py", "requirements.txt", "Dockerfile", "trained_model.pth"]
 
-# Use create_repo with exist_ok to update SDK
-from huggingface_hub import create_repo
-create_repo(
-    repo_id   = REPO_ID,
-    repo_type = "space",
-    space_sdk = "docker",
-    exist_ok  = True
-)
-print("✅ SDK changed to Docker")
+# Add refine model if it exists
+if os.path.exists("refine_model.pth"):
+    files.append("refine_model.pth")
+    print("✅ refine_model.pth found — will upload both models")
+else:
+    print("⚠ refine_model.pth not found — uploading Stage 1 only")
 
-# Upload all files
-for filename in ["app.py", "requirements.txt", "Dockerfile"]:
+for filename in files:
     print(f"Uploading {filename}...")
     api.upload_file(
         path_or_fileobj = filename,
@@ -31,15 +23,4 @@ for filename in ["app.py", "requirements.txt", "Dockerfile"]:
     )
     print(f"  ✅ {filename} uploaded")
 
-# add to upload.py and run
-from huggingface_hub import HfApi
-api = HfApi()
-api.upload_file(
-    path_or_fileobj = "README.md",
-    path_in_repo    = "README.md",
-    repo_id         = "OmarSherif0/landmark-detection",
-    repo_type       = "space"
-)
-print("✅ README.md uploaded")
-
-print("\nDone! Space will rebuild automatically.")
+print("\nDone!")
