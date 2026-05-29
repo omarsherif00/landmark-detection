@@ -86,6 +86,17 @@ def evaluate():
         MODEL_SAVE_PATH, map_location=device, weights_only=True
     ))
     model.eval()
+    # Load Porion dedicated model if available
+    porion_net = None
+    if os.path.exists("porion_model.pth"):
+        porion_net = PorionUNet().to(device)
+        porion_net.load_state_dict(torch.load(
+            "porion_model.pth", map_location=device, weights_only=True
+        ))
+        porion_net.eval()
+        print("✅ Porion dedicated model loaded")
+    else:
+        print("⚠ No porion_model.pth found — using Stage 1 for all landmarks")
 
     if os.path.exists("test_samples.json"):
         with open("test_samples.json") as f:
@@ -126,6 +137,17 @@ def evaluate():
             heatmap_to_coord(hm[i], orig_w, orig_h)
             for i in range(NUM_LANDMARKS)
         ])
+        # Porion refinement
+        if porion_net is not None:
+            s1_po_x, s1_po_y = pred_pts[PORION_IDX]
+            crop, x0, y0     = crop_patch(original, s1_po_x, s1_po_y, CROP_SIZE)
+            ct = torch.from_numpy(
+                np.array(crop).transpose(2,0,1)/255.0
+            ).float().unsqueeze(0).to(device)
+            with torch.no_grad():
+                po_hm = porion_net(ct)[0,0].cpu().numpy()
+            lx, ly = soft_argmax(po_hm, CROP_SIZE, CROP_SIZE)
+            pred_pts[PORION_IDX] = np.array([x0+lx, y0+ly])
 
         errors_px = np.sqrt(((pred_pts - gt_pts)**2).sum(axis=1))
         errors_mm = errors_px * px_to_mm
@@ -328,6 +350,60 @@ def evaluate():
         os.path.join(OUTPUT_DIR, 'per_landmark_results.xlsx'), index=False
     )
     print(f"\n✅ All results saved to: {OUTPUT_DIR}/")
+# ---- Porion dedicated model ----
+PORION_IDX = SELECTED_LANDMARKS.index('Po')
+CROP_SIZE  = 256
 
+class PorionUNet(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.enc1 = DoubleConv(3, 32)
+        self.enc2 = DoubleConv(32, 64)
+        self.enc3 = DoubleConv(64, 128)
+        self.enc4 = DoubleConv(128, 256)
+        self.pool = nn.MaxPool2d(2)
+        self.bottleneck = DoubleConv(256, 512)
+        self.up4  = nn.ConvTranspose2d(512, 256, 2, stride=2)
+        self.dec4 = DoubleConv(512, 256)
+        self.up3  = nn.ConvTranspose2d(256, 128, 2, stride=2)
+        self.dec3 = DoubleConv(256, 128)
+        self.up2  = nn.ConvTranspose2d(128, 64, 2, stride=2)
+        self.dec2 = DoubleConv(128, 64)
+        self.up1  = nn.ConvTranspose2d(64, 32, 2, stride=2)
+        self.dec1 = DoubleConv(64, 32)
+        self.out_conv = nn.Conv2d(32, 1, 1)
+
+    def forward(self, x):
+        e1 = self.enc1(x)
+        e2 = self.enc2(self.pool(e1))
+        e3 = self.enc3(self.pool(e2))
+        e4 = self.enc4(self.pool(e3))
+        b  = self.bottleneck(self.pool(e4))
+        d4 = self.dec4(torch.cat([self.up4(b),  e4], dim=1))
+        d3 = self.dec3(torch.cat([self.up3(d4), e3], dim=1))
+        d2 = self.dec2(torch.cat([self.up2(d3), e2], dim=1))
+        d1 = self.dec1(torch.cat([self.up1(d2), e1], dim=1))
+        return self.out_conv(d1)
+
+def soft_argmax(heatmap, out_w, out_h):
+    H, W    = heatmap.shape
+    hm_flat = heatmap.reshape(-1).astype(np.float64)
+    hm_flat = hm_flat - hm_flat.max()
+    weights = np.exp(hm_flat * 30.0)
+    weights = weights / (weights.sum() + 1e-9)
+    weights = weights.reshape(H, W)
+    xs = np.arange(W, dtype=np.float64)
+    ys = np.arange(H, dtype=np.float64)
+    x  = (weights.sum(axis=0) * xs).sum()
+    y  = (weights.sum(axis=1) * ys).sum()
+    return x * (out_w / W), y * (out_h / H)
+
+def crop_patch(image, cx, cy, crop_size=256):
+    orig_w, orig_h = image.size
+    half = crop_size // 2
+    x0   = max(0, min(int(cx)-half, orig_w-crop_size))
+    y0   = max(0, min(int(cy)-half, orig_h-crop_size))
+    crop = image.crop((x0, y0, x0+crop_size, y0+crop_size))
+    return crop, x0, y0
 if __name__ == "__main__":
     evaluate()
