@@ -7,6 +7,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY app.py .
 COPY trained_model.pth .
+COPY porion_model.pth .
 
 EXPOSE 7860
 

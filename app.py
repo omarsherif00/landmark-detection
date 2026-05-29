@@ -1,3 +1,4 @@
+# Landmark Detection API v2 - Stage1 + Porion dedicated model
 import torch
 import torch.nn as nn
 from PIL import Image
@@ -14,8 +15,9 @@ from pydantic import BaseModel
 NUM_LANDMARKS   = 21
 STAGE1_IMG_SIZE = (512, 512)
 CROP_SIZE       = 256
-STAGE1_MODEL    = "trained_model.pth"
-PORION_MODEL    = "porion_model.pth"
+BASE_DIR        = os.path.dirname(os.path.abspath(__file__))
+STAGE1_MODEL    = os.path.join(BASE_DIR, "trained_model.pth")
+PORION_MODEL    = os.path.join(BASE_DIR, "porion_model.pth")
 PORION_IDX      = 2  # index of 'Po' in SELECTED_LANDMARKS
 # ----------------
 
@@ -77,10 +79,7 @@ class PorionUNet(nn.Module):
         self.enc3 = DoubleConv(64, 128)
         self.enc4 = DoubleConv(128, 256)
         self.pool = nn.MaxPool2d(2)
-        self.bottleneck = nn.Sequential(
-            DoubleConv(256, 512),
-            nn.Dropout2d(p=0.3)
-        )
+        self.bottleneck = DoubleConv(256, 512)
         self.up4  = nn.ConvTranspose2d(512, 256, 2, stride=2)
         self.dec4 = DoubleConv(512, 256)
         self.up3  = nn.ConvTranspose2d(256, 128, 2, stride=2)
